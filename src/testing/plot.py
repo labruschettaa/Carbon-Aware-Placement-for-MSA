@@ -19,8 +19,8 @@ def initializeSettings():
     JSON_FILE_PATH = "testing_settings.json"
     with open(JSON_FILE_PATH, 'r') as file:
         json_data = json.load(file)
-    RND_CSV = json_data['CSV_DIRECTORY'] + 'Realistic_Experiment.csv'
-    HRST_CSV = json_data['CSV_DIRECTORY'] + 'Curated_Experiment.csv'
+    RND_CSV = json_data['CSV_DIRECTORY'] + 'Realistic_Experiment_'
+    HRST_CSV = json_data['CSV_DIRECTORY'] + 'Curated_Experiment_'
     return RND_CSV, HRST_CSV
 
 RND_CSV, HRST_CSV = initializeSettings()
@@ -65,8 +65,9 @@ def scalabilityResults(csvFile:str, modeTest:ModeTest, modeEnv:ModeEnv):
     plt.xlabel('Nodes')
     plt.xscale('log', base=2)
 
-    #ticks = [2**i for i in range(4, 21, 2)]  # Adjust the range as needed
-    #plt.xticks(ticks, [f'$2^{{{i}}}$' for i in range(4, 21, 2)])
+    ticks = [2**i for i in range(4, 21, 2)]  # Adjust the range as needed
+    plt.xticks(ticks, [f'$2^{{{i}}}$' for i in range(4, 21, 2)])
+    
     plt.ylabel('Time (seconds)')
     plt.legend()
     plt.grid(True)
@@ -132,10 +133,13 @@ prsr = argparse.ArgumentParser(description='Visualize the results of the experim
 prsr.add_argument('--modeEnv', type=str, choices=['rnd', 'crtd'], required=True, help='The mode of operation of the experiment that is to be visualized')
 prsr.add_argument('--modeTest', type=str, choices=['opt','quick0','quick1','quick2'], required=True, help='The mode of the solution that is to be visualized')
 prsr.add_argument('--parameter', type=str, choices=['accuracy', 'scalability'], required=True, help='The parameter that is to be visualized')
+prsr.add_argument('--app', type=str, help="The application's name")
 prsdArgs = prsr.parse_args()
 mode = ModeEnv[prsdArgs.modeEnv.upper()]
 test = ModeTest[prsdArgs.modeTest.upper()]
 parameter = prsdArgs.parameter
+HRST_CSV = HRST_CSV + prsdArgs.app + '.csv'
+RND_CSV = RND_CSV + prsdArgs.app + '.csv'
 
 
 if parameter == 'accuracy':
