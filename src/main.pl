@@ -7,10 +7,9 @@ timedPlacement(Mode, App, P, SCI, N, Time) :-
     statistics(cputime, TEnd),
     Time is TEnd - TStart.
 
-%# Finds a valid placement for the application and returns the SCI and the number of nodes associated with the placement.
-placement(quick0, App, P, SCI, NumberOfNodes) :- placement(quick, 0, App, P, SCI, NumberOfNodes).
-placement(quick1, App, P, SCI, NumberOfNodes) :- placement(quick, 1, App, P, SCI, NumberOfNodes).
-placement(quick2, App, P, SCI, NumberOfNodes) :- placement(quick, 2, App, P, SCI, NumberOfNodes).
+placement(greenonly, App, P, SCI, NumberOfNodes) :- placement(quick, 1, App, P, SCI, NumberOfNodes).
+placement(capacityonly, App, P, SCI, NumberOfNodes) :- placement(quick, 2, App, P, SCI, NumberOfNodes).
+placement(linearcombination, App, P, SCI, NumberOfNodes) :- placement(quick, 3, App, P, SCI, NumberOfNodes).
 placement(quick, NSort, App, P, SCI, NumberOfNodes) :-
     scoredNodes(Nodes, NSort),
     application(App, _, EPs),
@@ -30,10 +29,7 @@ placement(tempBase, App, P, SCI, NumberOfNodes) :-
     functionalUnits(App, R),
     involvedNodes(P, NumberOfNodes),
     sci(EPs, R, P, SCI).
-placement(oldopt, App, P, SCI, NumberOfNodes) :-
-    placement(base, App, P, SCI, NumberOfNodes),
-    \+ (placement(base, App, P1, S1, N1), dif(P1,P), (S1 < SCI ; (S1 =:= SCI, N1 < NumberOfNodes))).
-placement(opt, App, BestP, BestSCI, BestNumberOfNodes) :-
+placement(exhaustive, App, BestP, BestSCI, BestNumberOfNodes) :-
     findall(p(SCI, N, P), placement(base, App, P, SCI, N), [P|Placements]),
     findMinP(Placements, P, p(BestSCI,BestNumberOfNodes,BestP)).
 
@@ -46,18 +42,18 @@ findMinP([p(SCI,_,_)|Placement], p(OldMinSCI, OldN, OldP), p(NewSCI, NewN, NewP)
 findMinP([], P, P).
 
 scoredNodes(Nodes, NSort) :-
-    retractall(cs(_,_)), retractall(rs(_,_)),
+    retractall(cs(_,_)), retractall(rs(_,_)), retractall(ws(_,_)),
     carbonRankingFactors(), resourceRankingFactors(node),
-    findall(candidate(CS,RS,N), scores(N,CS,RS), TmpNodes), 
+    findall(candidate(CS,RS,WS,N), scores(N,CS,RS,WS), TmpNodes), 
     sort(NSort,@=<,TmpNodes,SNodes),
-    findall(N, member(candidate(_,_,N), SNodes), Nodes),
+    findall(N, member(candidate(_,_,_,N), SNodes), Nodes),
     cleanUp().
 
-scoredMicroservices(Microservices) :-
+scoredMicroservices(LstMs) :-
     retractall(rs(_,_)), resourceRankingFactors(microservice),
     findall(ms(RS,M), scores(M,RS), TmpMs), 
     sort(0,@=<,TmpMs,SMs),
-    findall(M, member(ms(_,M), SMs), Microservices),
+    findall(M, member(ms(_,M), SMs), LstMs),
     cleanUp().
 
 resourceScore(E, CPU, RAM, BWIn, BWOut, RS) :-
@@ -85,30 +81,33 @@ carbonRankingFactors() :-
     assert(maxMF(MaxMF)), assert(minMF(MinMF)).
 
 nodeOF(N,OF) :- node(N,_,PowerPerCPU,_,_,PUE), carbon_intensity(N,I), OF is PUE * I * PowerPerCPU, assert(of(N,OF)).
-
 nodeMF(N,MF) :- node(N,_,_,EL,TE,_), MF is TE/EL, assert(mf(N,MF)).
 
 scores(Ms,RS) :- resourceScore(microservice,Ms,RS).
-scores(N,CS,RS) :- carbonScore(N,CS), resourceScore(node,N,RS).
+scores(N,CS,RS,WS) :- carbonScore(N,CS), resourceScore(node,N,RS), weightedScore(N,CS,RS,WS).
 
-resourceScore(microservice,M,RS) :- microservice(M,rr(CPU, RAM, BWIn, BWOut),_), resourceScore(M, CPU, RAM, BWIn, BWOut, RS).
+resourceScore(microservice,Ms,RS) :- microservice(Ms,rr(CPU, RAM, BWIn, BWOut),_), resourceScore(Ms, CPU, RAM, BWIn, BWOut, RS).
 resourceScore(node,N,RS) :- node(N,tor(CPU, RAM, BWIn, BWOut),_,_,_,_), resourceScore(N, CPU, RAM, BWIn, BWOut, RS).
 
-eligiblePlacement(Ms, Nodes, P) :- eligiblePlacement(Ms, Nodes, [], P).
-eligiblePlacement([M|Ms], Nodes, P, NewP) :-
-    microservice(M, RR, _),
-    member(N,Nodes), placementNode(N, P, RR),
-    eligiblePlacement(Ms, Nodes, [on(M,N)|P], NewP).
-eligiblePlacement([], _, P, P).
-eligiblePlacement(Ms, P) :- eligible(Ms, [], P).
+weightedScore(N,CS,RS,WS) :- 
+    node(N,_,_,_,_,_),
+    WS is (0.5 * CS) + (0.5 * RS), 
+    assert(ws(N,WS)).
 
-eligible([M|Ms], P, NewP) :-
+eligiblePlacement(LstMs, LstN, P) :- eligiblePlacement(LstMs, LstN, [], P).
+eligiblePlacement(LstMs, P) :- eligible(LstMs, [], P).
+eligiblePlacement([M|LstMs], LstN, P, NewP) :-
     microservice(M, RR, _),
+    member(N,LstN), placementNode(N, P, RR),
+    eligiblePlacement(LstMs, LstN, [on(M,N)|P], NewP).
+eligiblePlacement([], _, P, P).
+
+eligible([Ms|LstMs], P, NewP) :-
+    microservice(Ms, RR, _),
     placementNode(N, P, RR),
-    eligible(Ms, [on(M,N)|P], NewP).
+    eligible(LstMs, [on(Ms,N)|P], NewP).
 eligible([], P, P).
 
-%# Checks if the node N can host the microservice M.
 placementNode(N, P, rr(CPUReq, RAMReq, BWinReq, BWoutReq)) :-
     node(N, tor(CPU, RAM, BWin, BWout), _, _, _, _),
     hardwareUsedAtNode(N, P, rr(UCPU, URAM, UBWin, UBWout)),
@@ -117,17 +116,14 @@ placementNode(N, P, rr(CPUReq, RAMReq, BWinReq, BWoutReq)) :-
     BWin >= UBWin + BWinReq, 
     BWout >= UBWout + BWoutReq.
 
-%# Counts the number of nodes used by the placement.
 involvedNodes(P, InvolvedNodes) :-
     findall(N, distinct(node(N,_), member(on(_,N),P)), Nodes), 
     length(Nodes, InvolvedNodes).
 
-%# Calculates the amount of hardware used on node N.
 hardwareUsedAtNode(N, P, rr(UCPU, URAM, UBWin, UBWout)) :-
-    findall(rr(CPU,RAM,BWin,BWout), (member(on(M,N),P), microservice(M,rr(CPU,RAM,BWin,BWout),_)), RRs),
+    findall(rr(CPU,RAM,BWin,BWout), (member(on(Ms,N),P), microservice(Ms,rr(CPU,RAM,BWin,BWout),_)), RRs),
     sumHWReqs(RRs, rr(UCPU, URAM, UBWin, UBWout)).
 
-%# Sums the hardware requirements of each microservice M placed on node N.
 sumHWReqs([rr(CPU,RAM,BWin,BWout) | RRs], rr(TCPU, TRAM, TBWin, TBWout)) :-
     sumHWReqs(RRs, rr(AccCPU, AccRAM, AccBWin, AccBWout)),
     TCPU is AccCPU + CPU,
@@ -136,47 +132,40 @@ sumHWReqs([rr(CPU,RAM,BWin,BWout) | RRs], rr(TCPU, TRAM, TBWin, TBWout)) :-
     TBWout is AccBWout + BWout.
 sumHWReqs([], rr(0,0,0,0)).
 
-%# Calculates the SCI of the application's placement.
-sci(EndPoints, R, P, SCI) :- sci(EndPoints,R,P,0,SCI).
+sci(EPs, R, P, SCI) :- sci(EPs,R,P,0,SCI).
 sci([EP|EPs], R, P, OldSCI, NewSCI) :-
     endpointSCI(EP,R,P,EPSCI),
     TmpSCI is OldSCI + EPSCI,
     sci(EPs,R,P,TmpSCI,NewSCI).
 sci([],_,_,SCI,SCI).
 
-%# Calculates the SCI relative to a single endpoint considering the probability
-%# that said endpoint is called.
 endpointSCI(EP, R, P, SCI) :-
     endpoint(EP, EPMs),
-    findall(on(M,N), (member(M, EPMs), member(on(M, N), P)), FilteredP),
+    findall(on(Ms,N), (member(Ms, EPMs), member(on(Ms, N), P)), FilteredP),
     probability(EP, Prob),
     carbonEmissions(FilteredP, C),
     SCI is (C / R) * Prob.
 
-%# Calculates the carbon amount of a placement.
-carbonEmissions([on(Microservice,Node)|P], C) :-
+carbonEmissions([on(Ms,N)|P], C) :-
     carbonEmissions(P, AccC),
-    operationalCarbon(Node, Microservice, O),
-    embodiedCarbon(Node, Microservice, E),
+    operationalCarbon(N, Ms, O),
+    embodiedCarbon(N, Ms, E),
     C is AccC + O + E.
 carbonEmissions([], 0).
 
-%# Calculates the amount of energy required to run microservice M on node N for the entire TiL.
-operationalEnergy(Node, Microservice, E) :-
-    node(Node, _, PowerPerCPU, _, _, PUE),
-    microservice(Microservice, _, TiR),
+operationalEnergy(N, Ms, E) :-
+    node(N, _, PowerPerCPU, _, _, PUE),
+    microservice(Ms, _, TiR),
     E is PUE * (TiR * 365 * 24) * PowerPerCPU.
 
-%# Calculates the carbon intensity of running microservice M on node N.
-operationalCarbon(Node, Microservice, O) :-
-    carbon_intensity(Node, I),
-    operationalEnergy(Node, Microservice, E),
+operationalCarbon(N, Ms, O) :-
+    carbon_intensity(N, I),
+    operationalEnergy(N, Ms, E),
     O is E * I.
 
-%# Calculates the embodied carbon intensity of microservice M on node N.
-embodiedCarbon(Node, Microservice, M) :-
-    node(Node, tor(CPU,_,_,_), _, EL, TE, _),
-    microservice(Microservice, rr(CPUReq,_,_,_), TiR),
+embodiedCarbon(N, Ms, M) :-
+    node(N, tor(CPU,_,_,_), _, EL, TE, _),
+    microservice(Ms, rr(CPUReq,_,_,_), TiR),
     TS is TiR / EL,
     RS is CPUReq / CPU,
     M is TE * TS * RS.

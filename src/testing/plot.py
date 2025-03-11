@@ -46,16 +46,18 @@ def scalabilityResults(csvFile:str, modeTest:ModeTest, modeEnv:ModeEnv):
     
     modetest = modeTest.name.lower()
     df.replace(['X', '/'], pd.NA, inplace=True)
+    print(modetest)
     df[f'Time_{modetest}'] = pd.to_numeric(df[f'Time_{modetest}'], errors='coerce')
     
     df = df.dropna(subset=[f'Time_{modetest}'])
     
     avgTime = df.groupby(['Microservices', 'InfrastructureNodes'])[f'Time_{modetest}'].mean().reset_index()
+    print(avgTime)
     
     plt.figure(figsize=(10, 6))
-    if modeEnv == ModeEnv.CRTD:
+    if modeEnv == ModeEnv.CURATED:
         plt.plot(avgTime['InfrastructureNodes'], avgTime[f'Time_{modetest}'], marker='o', linestyle='-', label='6 Endpoints')
-    elif modeEnv == ModeEnv.RND:
+    elif modeEnv == ModeEnv.RANDOM:
         for i, ms in enumerate(avgTime['Microservices'].unique()):
             ms_data = avgTime[avgTime['Microservices'] == ms]
             plt.plot(ms_data['InfrastructureNodes'], ms_data[f'Time_{modetest}'], marker='o', linestyle='-', label=f'Microservices {ms}')
@@ -64,17 +66,12 @@ def scalabilityResults(csvFile:str, modeTest:ModeTest, modeEnv:ModeEnv):
 
     plt.xlabel('Nodes')
     plt.xscale('log', base=2)
-
-    #ticks = [2**i for i in range(4, 21, 2)]  # Adjust the range as needed
-    #plt.xticks(ticks, [f'$2^{{{i}}}$' for i in range(4, 21, 2)])
     plt.ylabel('Time (seconds)')
     plt.legend()
     plt.grid(True)
     plt.show()
 
-# py wrapper.py "../resources/applications/applicationFULLms.pl" "../resources/generated_infrastructures/crtd_12.pl" --mode base --p "[on(frontend, f_0), on(checkout, f_1), on(currency, f_2), on(email, f_3), on(payment, f_4), on(recommendation, f_5), on(shipping, f_6), on(ad, f_7), on(cart, f_8), on(product_catalog, f_9)]"
-#[16,32,64,128,256,512,1024,2048,4096,8192,16384,32768,65536,131072,262144,524288,1048576],
-# timedPlacement()
+
 def accuracyResults(csvFile:str, modeTest:ModeTest, modeEnv:ModeEnv):
     """Plots the accuracy results from a CSV file.
 
@@ -95,27 +92,24 @@ def accuracyResults(csvFile:str, modeTest:ModeTest, modeEnv:ModeEnv):
     
     modetest = modeTest.name.lower()
     df[f'SCI_{modetest}'] = pd.to_numeric(df[f'SCI_{modetest}'], errors='coerce')
-    df['SCI_opt'] = pd.to_numeric(df['SCI_opt'], errors='coerce')
+    df['SCI_exhaustive'] = pd.to_numeric(df['SCI_exhaustive'], errors='coerce')
     df['InfrastructureNodes'] = pd.to_numeric(df['InfrastructureNodes'], errors='coerce')
     df['Microservices'] = pd.to_numeric(df['Microservices'], errors='coerce')
 
-    df['SCI_diff'] = abs(df[f'SCI_{modetest}'] - df['SCI_opt']) / df['SCI_opt'] 
+    df['SCI_diff'] = abs(df[f'SCI_{modetest}'] - df['SCI_exhaustive']) / df['SCI_exhaustive'] 
 
     df = df.dropna(subset=['SCI_diff'])
     avgSCIDiff = None
 
-    if modeEnv == ModeEnv.CRTD:
-        avgSCIDiff = df.groupby('InfrastructureNodes')['SCI_diff'].mean().reset_index()
-    else:
-        avgSCIDiff = df.groupby(['Microservices', 'InfrastructureNodes'])['SCI_diff'].mean().reset_index()
-    
     plt.figure(figsize=(10, 6))
-    if modeEnv == ModeEnv.CRTD:
+    if modeEnv == ModeEnv.CURATED:
+        avgSCIDiff = df.groupby('InfrastructureNodes')['SCI_diff'].mean().reset_index()
         if not avgSCIDiff.empty:
             plt.plot(avgSCIDiff['InfrastructureNodes'], avgSCIDiff['SCI_diff'], marker='o', linestyle='-', color='b', label='6 Endpoints')
         else:
             print("No data available for CRTD mode.")
-    elif modeEnv == ModeEnv.RND:
+    elif modeEnv == ModeEnv.RANDOM:
+        avgSCIDiff = df.groupby(['Microservices', 'InfrastructureNodes'])['SCI_diff'].mean().reset_index()
         colormap = plt.colormaps.get_cmap('tab10')
         colors = [colormap(i) for i in range(len(avgSCIDiff['Microservices'].unique()))]
         for i, ms in enumerate(avgSCIDiff['Microservices'].unique()):
@@ -126,12 +120,8 @@ def accuracyResults(csvFile:str, modeTest:ModeTest, modeEnv:ModeEnv):
 
     plt.xlabel('Nodes')
     plt.ylabel('SCI Difference')
-    plt.ylim(0, 1)  
     plt.yscale('linear')
     plt.xscale('log', base=2)
-    
-    #ticks = [2**i for i in range(4, 21, 2)]  # Adjust the range as needed
-    #plt.xticks(ticks, [f'$2^{{{i}}}$' for i in range(4, 21, 2)])
 
     plt.legend()
     plt.grid(True)
@@ -139,8 +129,8 @@ def accuracyResults(csvFile:str, modeTest:ModeTest, modeEnv:ModeEnv):
     
 
 prsr = argparse.ArgumentParser(description='Visualize the results of the experiments')
-prsr.add_argument('--modeEnv', type=str, choices=['rnd', 'crtd'], required=True, help='The mode of operation of the experiment that is to be visualized')
-prsr.add_argument('--modeTest', type=str, choices=['opt','quick0','quick1','quick2'], required=True, help='The mode of the solution that is to be visualized')
+prsr.add_argument('--modeEnv', type=str, choices=['random', 'curated'], required=True, help='The mode of operation of the experiment that is to be visualized')
+prsr.add_argument('--modeTest', type=str, choices=['exhaustive','greenonly','capacityonly','linearcombination'], required=True, help='The mode of the solution that is to be visualized')
 prsr.add_argument('--parameter', type=str, choices=['accuracy', 'scalability'], required=True, help='The parameter that is to be visualized')
 prsdArgs = prsr.parse_args()
 mode = ModeEnv[prsdArgs.modeEnv.upper()]
@@ -149,16 +139,16 @@ parameter = prsdArgs.parameter
 
 
 if parameter == 'accuracy':
-    if mode == ModeEnv.CRTD:
+    if mode == ModeEnv.CURATED:
         accuracyResults(HRST_CSV, test, mode)
-    elif mode == ModeEnv.RND:
+    elif mode == ModeEnv.RANDOM:
         accuracyResults(RND_CSV, test, mode)
     else:
         raise ValueError('Invalid modeEnv')
 elif parameter == 'scalability':
-    if mode == ModeEnv.CRTD:
+    if mode == ModeEnv.CURATED:
         scalabilityResults(HRST_CSV, test, mode)
-    elif mode == ModeEnv.RND:
+    elif mode == ModeEnv.RANDOM:
         scalabilityResults(RND_CSV, test, mode)
     else:
         raise ValueError('Invalid modeEnv')

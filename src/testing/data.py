@@ -32,8 +32,6 @@ CLEAN_CI = EMISSIONS[0]['emission']
 DIRTY_PUE = 3.0
 DIRTY_CI = EMISSIONS[len(EMISSIONS)-1]['emission']
 
-
-### Enum class for different type of realistic random nodes with different specifications. ###
 class NodeS(Enum):
     """Enumeration for different sizes of nodes."""
     NANO = 0
@@ -44,8 +42,6 @@ class NodeS(Enum):
     XLARGE = 5
     X2LARGE = 6
 
-### Enum class for different type of nodes. ###
-### The RANDOM node is for generating random realistic nodes, while the others are for the curated enviroment. ###
 class NodeT(Enum):
     """Enumeration for different types of nodes.
 
@@ -140,7 +136,7 @@ class FactoryNode:
 
     
     @staticmethod
-    def __randNode():
+    def __randNode() -> Node:
         """Generates a random node of class `Node`.
 
         Returns:
@@ -151,7 +147,7 @@ class FactoryNode:
         return node    
 
     @staticmethod
-    def __nodeT(nodeType:NodeT, ms:Microservice=None):
+    def __nodeT(nodeType:NodeT, ms:Microservice=None) -> Node:
         """Generates a node of the specified type `NodeT`.
 
         Args:
@@ -191,7 +187,7 @@ class FactoryNode:
                 raise Exception("Invalid node type.")
             
     @staticmethod
-    def __nodeS(nodeType:NodeS):
+    def __nodeS(nodeType:NodeS) -> Node:
         """Generates a node of the specified size `NodeS`.
 
         Args:
@@ -248,21 +244,21 @@ class ModeEnv(Enum):
         OPT (int): Random realistic mode.
         CRTD (int): Curated mode.
     """
-    RND = 0
-    CRTD = 1
+    RANDOM = 0
+    CURATED = 1
 
 class ModeTest(Enum):
     """Enumeration for different placement modes.
 
     Attributes:
-        OPT (int): Optimized mode.
-        QUICK0 (int): Quick mode 0.
-        QUICK1 (int): Quick mode 1.
-        QUICK2 (int): Quick mode 2.
-        BASE (int): Base mode.
+        EXHAUSTIVE (int): Exhaustive search.
+        GREENONLY (int): Heuristic search, green-only configuration
+        CAPACITYONLY (int): Heuristic search, capacity-only configuration
+        LINEARCOMBINATION (int): Heuristic search, linear combination configuration
+        BASE (int): Base search.
     """
-    OPT = 0
-    QUICK0 = 1
-    QUICK1 = 2
-    QUICK2 = 3
+    EXHAUSTIVE = 0
+    GREENONLY = 1
+    CAPACITYONLY = 2
+    LINEARCOMBINATION = 3
     BASE = 4

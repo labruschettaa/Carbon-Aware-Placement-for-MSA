@@ -23,7 +23,7 @@ def getParameters() -> Tuple[str, str, str, bool, Optional[List[str]]]:
     prsr = argparse.ArgumentParser(description='Run experiments')
     prsr.add_argument('aFile', type=str, help='Application file')
     prsr.add_argument('iFile', type=str, help='Infrastructure file')
-    prsr.add_argument('--mode', type=str, choices=['quick0', 'quick1', 'quick2', 'opt', 'oldopt', 'base'], required=True, help='Mode of operation')
+    prsr.add_argument('--mode', type=str, choices=['greenonly', 'capacityonly', 'linearcombination', 'exhaustive', 'base'], required=True, help='Mode of operation')
     prsr.add_argument('--t', action='store_true', help=argparse.SUPPRESS)
     # --- Expected packing format = "['on(microservice, node)', 'on(microservice, node)', ...]" --- #
     prsr.add_argument('--p', type=parsePacking, required=False, help='Packing')
@@ -90,7 +90,7 @@ with PrologMQI() as mqi:
             mode= 'tempBase'
             prolog_thread.query_async(f"timedPlacement({mode}, App, {p}, SCI, N, Time).", find_all=False)
             result = prolog_thread.query_async_result()
-        elif mode=='opt':
+        elif mode=='exhaustive':
             result = prolog_thread.query(f"timedPlacement({mode}, App, P, SCI, N, Time).")
         else:
             prolog_thread.query_async(f"timedPlacement({mode}, App, P, SCI, N, Time).", find_all=False)

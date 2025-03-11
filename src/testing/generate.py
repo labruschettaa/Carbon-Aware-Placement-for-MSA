@@ -1,11 +1,14 @@
 from swiplserver import PrologMQI
 import random as rnd
 from data import FactoryNode, NodeT, Microservice, ModeEnv
-import argparse, os, re, sys
-from enum import Enum
-from abc import ABC
+import argparse, os, re, sys, json
 from typing import Tuple, List, Optional
 
+JSON_FILE_PATH = "testing_settings.json"
+with open(JSON_FILE_PATH, 'r') as file:
+        json_data = json.load(file)
+GENERATED_INFRASTRUCTURE_DIRECTORY = json_data['GENERATED_INFRASTRUCTURE_DIRECTORY']
+APPLICATION_DIRECTORY = json_data['APPLICATION_DIRECTORY']
 
 def getParameters() -> Tuple[Optional[str], Optional[str], List[int], Optional['ModeEnv'], Optional[int], bool]:
     """Parses and returns the command-line arguments for generating infrastructures.
@@ -23,19 +26,20 @@ def getParameters() -> Tuple[Optional[str], Optional[str], List[int], Optional['
         SystemExit: If required arguments are missing when --clean is not specified.
     """
     prsr = argparse.ArgumentParser(description='Run experiments')
-    prsr.add_argument('infraFile', type=str, help='Infrastructure file directory')
-    prsr.add_argument('appFile', type=str, nargs='?', help='Application file directory')
-    prsr.add_argument('--mode', type=str, choices=['rnd', 'crtd'], help='Mode of operation: rnd (Random/Realistic) or crtd (Curated)')
+    prsr.add_argument('--infraDir', type=str, help='Infrastructure directory', default=GENERATED_INFRASTRUCTURE_DIRECTORY)
+    prsr.add_argument('--appFile', type=str, help='Application file directory')
+    prsr.add_argument('--mode', type=str, choices=['random', 'curated'], help='Mode of operation: rnd (Random/Realistic) or crtd (Curated)')
     prsr.add_argument('--seed', type=int, help='Seed value')
     prsr.add_argument('--clean', action='store_true', help='Clean the testing directory')
     prsr.add_argument('args', type=str, help='String of integers')
     prsdArgs = prsr.parse_args()
+    modeEnv = ModeEnv[prsdArgs.mode.upper()]
 
-    if prsdArgs.mode == 'crtd' and not prsdArgs.appFile:
+    if modeEnv == ModeEnv.CURATED and not prsdArgs.appFile:
         prsr.error("The application file (appFile) must be specified to generate the curated environment.")
 
     args_list = [int(x) for x in prsdArgs.args.split() if x]
-    return prsdArgs.appFile, prsdArgs.infraFile, args_list, ModeEnv[prsdArgs.mode.upper()], prsdArgs.seed, prsdArgs.clean
+    return prsdArgs.appFile, prsdArgs.infraDir, args_list, modeEnv, prsdArgs.seed, prsdArgs.clean
 
 
 def cleanDirectory(dir: str):
@@ -58,23 +62,23 @@ def cleanDirectory(dir: str):
         print(f"Failed to delete: {fpath}. Reason: {e}")
 
 
-class Env(ABC):
+class Env():
     """Abstract base class for environment generation."""
 
-    def __init__(self, mode: ModeEnv, numNodes: int, infraFileName: str, appFile: str = None):
+    def __init__(self, mode: ModeEnv, numNodes: int, infraDirectory: str, appFile: str = None):
         """Initializes the Env class with the specified parameters.
 
         Args:
             mode (Mode): The mode of generation.
             numNodes (int): Number of nodes.
-            infraFileName (str): The name of the file to save the generated environment.
+            infraDirectory (str): The directory to save the generated environment.
             appFile (str, optional): The application file required for the CRTD mode of generation.
 
         Raises:
             Exception: If CRTD mode is selected and aFile is not provided.
         """
         self._numNodes = numNodes
-        self._infraFileName = infraFileName
+        self._infraDirectory = infraDirectory
         self._mode = mode
         self._appFile = appFile
 
@@ -111,10 +115,10 @@ class Env(ABC):
         Raises:
             Exception: If an invalid mode is specified.
         """
-        if self._mode == ModeEnv.RND:
-            return RndEnv(self._numNodes, self._infraFileName).generate()
-        elif self._mode == ModeEnv.CRTD:
-            return CrtdEnv(self._numNodes, self._infraFileName, self._appFile).generate()
+        if self._mode == ModeEnv.RANDOM:
+            return RndEnv(self._numNodes, self._infraDirectory).generate()
+        elif self._mode == ModeEnv.CURATED:
+            return CrtdEnv(self._numNodes, self._infraDirectory, self._appFile).generate()
         else:
             raise Exception("Invalid mode.")
 
@@ -125,16 +129,15 @@ class CrtdEnv(Env):
     Inherits from the Env class and generates a curated environment with the specified number of nodes.
     """
 
-    def __init__(self, numNodes: int, infraFileName: str, appFile: str):
+    def __init__(self, numNodes: int, infraDirectory:str, appFile: str):
         """Initializes the CrtdEnv class with the specified parameters.
 
         Args:
             numNodes (int): Number of nodes.
-            infraFileName (str): The name of the file to save the generated environment.
-            appFile (str): The application file required for the CRTD mode of generation.
+            infraDirectory (str): The directory to save the generated environment.
+            appFile (str): The application file required for the CURATED mode of generation.
         """
-        super().__init__(ModeEnv.CRTD, numNodes, infraFileName)
-        self.__appFile = appFile
+        super().__init__(ModeEnv.CURATED, numNodes, infraDirectory, appFile)
         self.__optimal = []
 
     def getOptimal(self) -> List[dict]:
@@ -160,7 +163,7 @@ class CrtdEnv(Env):
 
         msList = []
         with PrologMQI().create_thread() as prolog_thread:
-            prolog_thread.query(f"consult('{self.__appFile}')")
+            prolog_thread.query(f"consult('{self._appFile}')")
             msNameList = prolog_thread.query(f"application(A, MS, EPs).")[0]['MS']
             if self._numNodes < len(msNameList):
                 print(f"Number of nodes ({self._numNodes}) must be greater than the number of microservices ({len(msNameList)}).")
@@ -188,8 +191,9 @@ class CrtdEnv(Env):
                 intensities += fitIntensity
             if not os.path.exists(infraDirectory):
                 os.makedirs(infraDirectory)
-            with open(self._infraFileName, "w") as file:
+            with open(self._infraDirectory + f"/crtd_{self._numNodes}.pl", "w") as file:
                 file.write(nodes + intensities)
+        print(self.getOptimal())
 
 
 class RndEnv(Env):
@@ -198,14 +202,14 @@ class RndEnv(Env):
     Inherits from the Env class and generates a random environment with the specified number of nodes.
     """
 
-    def __init__(self, numNodes: int, infraFileName: str):
+    def __init__(self, numNodes: int, infraDirectory:str):
         """Initializes the RndEnv class with the specified parameters.
 
         Args:
             numNodes (int): Number of nodes.
-            infraFileName (str): The name of the file to save the generated environment.
+            infraDirectory (str): The directory to save the generated environment.
         """
-        super().__init__(ModeEnv.RND, numNodes, infraFileName)
+        super().__init__(ModeEnv.RANDOM, numNodes, infraDirectory)
 
     def generate(self):
         """Generates the random environment and writes it to the specified file.
@@ -218,7 +222,7 @@ class RndEnv(Env):
         nodes, intensities = self._generateNodes(self._numNodes, NodeT.RANDOM)
         if not os.path.exists(infraDirectory):
             os.makedirs(infraDirectory)
-        with open(self._infraFileName, "w") as file:
+        with open(self._infraDirectory + f"/rnd_{self._numNodes}.pl", "w") as file:
             file.write(nodes + intensities)
 
 
@@ -232,16 +236,19 @@ with PrologMQI() as mqi:
     if seed is not None:
         rnd.seed(seed)
 
-    for i, n in enumerate(nList):
-        infraFile = ""
-        if mode == ModeEnv.RND:
-            infraFileName = infraDirectory + f"rnd_{n}.pl"
-            env = RndEnv(n, infraFileName)
-        elif mode == ModeEnv.CRTD:
-            infraFileName = infraDirectory + f"crtd_{n}.pl"
-            env = CrtdEnv(n, infraFileName, appDirectory)
-        else:
-            raise Exception("Invalid mode.")
+    for n in nList:
+        env = Env(mode, n, infraDirectory, appDirectory)
         env.generate()
-        if mode == ModeEnv.CRTD:
-            print(env.getOptimal())
+    """
+    if mode == ModeEnv.RANDOM:
+        infraFileName = infraDirectory + f"rnd_{n}.pl"
+        env = RndEnv(n, infraFileName)
+    elif mode == ModeEnv.CURATED:
+        infraFileName = infraDirectory + f"crtd_{n}.pl"
+        env = CrtdEnv(n, infraFileName, appDirectory)
+    else:
+        raise Exception("Invalid mode.")
+    env.generate()
+    if mode == ModeEnv.CURATED:
+        print(env.getOptimal())
+    """

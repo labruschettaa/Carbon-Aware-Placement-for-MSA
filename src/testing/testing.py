@@ -1,4 +1,4 @@
-from data import ModeTest
+from data import ModeTest, ModeEnv
 import os, subprocess, sys, re, json, csv, argparse
 from swiplserver import PrologMQI
 import json
@@ -61,58 +61,49 @@ class CSVWriter:
         Args:
             csvFile (str): The path to the CSV file.
         """
-        self.csvFile = csvFile
-        if prsdArgs.csvWritingMode == 'write' or not os.path.exists(csvFile):
-            self.file =  open(self.csvFile, 'w', newline='')
-            csvwriter = csv.writer(self.file)
-            csvwriter.writerow(["Iteration", "Microservices", "InfrastructureNodes", "Time_opt", "Time_quick0", "Time_quick1", "Time_quick2", "SCI_opt", "SCI_quick0", "SCI_quick1", "SCI_quick2", "NumNodes_opt", "NumNodes_quick0", "NumNodes_quick1", "NumNodes_quick2"])
+        if not os.path.exists(csvFile):
+            self.__file =  open(csvFile, 'w', newline='')
+            csvwriter = csv.writer(self.__file)
+            csvwriter.writerow(["Iteration", "Microservices", "InfrastructureNodes", "Time_exhaustive", "Time_greenonly", "Time_capacityonly", "Time_linearcombination", "SCI_exhaustive", "SCI_greenonly", "SCI_capacityonly", "SCI_linearcombination", "NumNodes_exhaustive", "NumNodes_greenonly", "NumNodes_capacityonly", "NumNodes_linearcombination"])
         else:
-            self.file = open(csvFile, 'a', newline='')
+            self.__file = open(csvFile, 'a', newline='')
+        
 
-    def writeResults(self, nList, resultsListOpt, resultsListQuick0, resultsListQuick1, resultsListQuick2):
+    def writeResults(self, nList, resultsListExhaustive, resultsListGreenOnly, resultsListCapacityOnly, resultsListLinearCombination):
         """Writes the test results to the CSV file.
 
         Args:
             nList (list): List of n values.
-            resultsListOpt (list): List of optimized results.
-            resultsListQuick0 (list): List of quick results for test 0.
-            resultsListQuick1 (list): List of quick results for test 1.
-            resultsListQuick2 (list): List of quick results for test 2.
+            resultsListExhaustive (list): Results for the exhaustive test.
+            resultsListGreenOnly (list): Results for the configuration greenonly.
+            resultsListCapacityOnly (list): Results for the configuration capacityonly.
+            resultsListLinearCombination (list): Results for the configuration linearcombination.
         """
-        csvwriter = csv.writer(self.file)
+        csvwriter = csv.writer(self.__file)
         for i, _ in enumerate(nList):
-            resQ0 = resultsListQuick0[i]
-            resQ1 = resultsListQuick1[i]
-            resQ2 = resultsListQuick2[i]
-            resO = resultsListOpt[i]
-            if resQ0['Ms'] != resO['Ms'] or resQ0['I'] != resO['I']:
+            resGO = resultsListGreenOnly[i]
+            resCO = resultsListCapacityOnly[i]
+            resLC = resultsListLinearCombination[i]
+            resO = resultsListExhaustive[i]
+            if resGO['Ms'] != resO['Ms'] or resGO['I'] != resO['I']:
                 print("Error: Ms mismatch")
             csvwriter.writerow(
-                [resQ0['I'] + 1, resQ0['Ms'], nList[i],
-                 resO['Time'], resQ0['Time'], resQ1['Time'], resQ2['Time'],
-                 resO['SCI'], resQ0['SCI'], resQ1['SCI'], resQ2['SCI'],
-                 resO['N'], resQ0['N'], resQ1['N'], resQ2['N']]
+                [resO['I'] + 1, resO['Ms'], nList[i],
+                 resO['Time'], resGO['Time'], resCO['Time'], resLC['Time'],
+                 resO['SCI'], resGO['SCI'], resCO['SCI'], resLC['SCI'],
+                 resO['N'], resGO['N'], resCO['N'], resLC['N']]
             )
 
 
 class Test:
     """Class that represents a test to be executed."""
-    def __init__(self, csvFile:str):
+    def __init__(self, mode:ModeTest):
         """Initializes the Test with the specified CSV file.
         Args:
-            csvFile (str): The path to the CSV file.
+            mode (ModeTest): The mode in which the test is executed.
         """
-        directory = os.path.dirname(csvFile)
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-        
-        # Ensure the file exists
-        if not os.path.exists(csvFile):
-            with open(csvFile, 'w') as file:
-                pass 
-        
-        self._csvWriter = CSVWriter(csvFile)
-        self._nList, self._resultsQuick0, self._resultsQuick1, self._resultsQuick2, self._resultsOpt = [], [], [], [], []
+        self.__mode = mode
+        self._nList, self._resultsGreenOnly, self._resultsCapacityOnly, self._resultsLinearCombination, self._resultsExhaustive = [], [], [], [], []
 
     def _placementResults(self, apath:str, fpath:str, mode:ModeTest, results, iteration:int, ms:int, failed=False, packing=None):
         """Processes the placement results and updates the results list.
@@ -138,8 +129,8 @@ class Test:
                 res = self._place(apath, fpath, mode, packing)
                 res = res.decode('utf-8').strip().replace("'", '"')
                 res = json.loads(res)[0]
-                # --- Saves the result as the optimal placement. --- #
-                self._resultsOpt.append({'I': iteration, 'Ms': ms, 'Time': res['Time'], 'SCI': res['SCI'], 'N': res['N']})
+                # --- Saves the result as the EXHAUSTIVEimal placement. --- #
+                self._resultsExhaustive.append({'I': iteration, 'Ms': ms, 'Time': res['Time'], 'SCI': res['SCI'], 'N': res['N']})
                 return True
             else:
                 res = self._place(apath, fpath, mode)
@@ -167,7 +158,7 @@ class Test:
             app (str): The path to the application file.
             infra (str): The path to the infrastructure file.
             mode (Mode): The mode in which the placement is executed.
-            packing (int, optional): The packing option for the placement. Defaults to None.
+            packing (int, optional): The packing for the placement. Defaults to None.
 
         Returns:
             bytes: The standard output from the subprocess if successful.
@@ -175,7 +166,7 @@ class Test:
         """
         try:
             if mode == ModeTest.BASE and packing is not None:
-                # --- TODO: Fix the packing option for the base mode. --- #
+                # --- TODO: Fix the packing EXHAUSTIVEion for the base mode. --- #
                 command = [sys.executable, '../wrapper.py', app, infra, '--m', mode.name.lower(), '--t', '--p', str(packing)]
             else:
                 command = [sys.executable, '../wrapper.py', app, infra, '--m', mode.name.lower(), '--t']
@@ -189,7 +180,6 @@ class Test:
             return None
         except subprocess.TimeoutExpired:
             print(f"The subprocess timed out after {TIMEOUT_SECONDS} seconds.")
-            sp.kill()
             return None
     
     def _extractNumber(self, filename):
@@ -225,17 +215,27 @@ class Test:
             filePath = os.path.join(directory, file)
             os.remove(filePath)
     
+    def runTests(self):
+        if self.__mode == ModeEnv.RANDOM:
+            return RandomTestEnv().runTests()
+        elif self.__mode == ModeEnv.CURATED:
+            if any(node < countMicroservices(FULL_APPLICATION_DIRECTORY) for node in NODES):
+                print("Error: A curated enviroment test cannot have less nodes than the number of microservices in the application.")
+                sys.exit(1)
+            return CuratedTestEnv().runTests()
+        else:
+            print("Invalid mode of operation.")
+            return False
 
 
-class RealisticTestEnv(Test):
+class RandomTestEnv(Test):
     """A class to execute tests in realistic generated environments.
     After a tests is terminated its results are written to a CSV file."""
 
     def __init__(self):
-        """Initializes the RealisticTestEnv with default values."""
-        self.__CSVFile = CSV_DIRECTORY + "Realistic_Experiment.csv"
-        super().__init__(self.__CSVFile)
-
+        """Initializes the RandomTestEnv with default values."""
+        super().__init__(ModeEnv.RANDOM)
+        self.__csvWriter = CSVWriter(CSV_DIRECTORY + "Realistic_Experiment.csv")
 
     def runTests(self):
         """Runs the tests with the specified settings."""
@@ -246,9 +246,9 @@ class RealisticTestEnv(Test):
             self._deleteTestFiles(INFRASTRUCTURE_DIRECTORY, re.compile(r'rnd_(\d+)\.pl'))
             nodesSTR = ' '.join(map(str, NODES))
             if prsdArgs.clean:
-                command = [sys.executable, 'generate.py', INFRASTRUCTURE_DIRECTORY, '--clean', '--mode', 'rnd', '--seed', str(SEEDS[iteration]), nodesSTR]
+                command = [sys.executable, 'generate.py', '--infraDir', INFRASTRUCTURE_DIRECTORY, '--clean', '--mode', 'random', '--seed', str(SEEDS[iteration]), nodesSTR]
             else:
-                command = [sys.executable, 'generate.py', INFRASTRUCTURE_DIRECTORY, '--mode', 'rnd', '--seed',  str(SEEDS[iteration]), nodesSTR]  
+                command = [sys.executable, 'generate.py', '--infraDir', INFRASTRUCTURE_DIRECTORY, '--mode', 'random', '--seed',  str(SEEDS[iteration]), nodesSTR]  
             subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
             # --- Executes all the test for each application in the application directory. --- #
@@ -260,25 +260,25 @@ class RealisticTestEnv(Test):
                 else:
                     ms = 11
 
-                # --- Executes the optimal and heuristic solutions for each infrastructure generated. --- #
+                # --- Executes the exhaustive and heuristic solutions for each infrastructure generated. --- #
                 failed = False
                 for file in self._getTestFiles(INFRASTRUCTURE_DIRECTORY, re.compile(r'rnd_(\d+)\.pl')):
                     self._nList.append(self._extractNumber(file))
                     print(f'Executing tests for file: {file}, number of microservices: {ms}...')
                     fpath = os.path.join(INFRASTRUCTURE_DIRECTORY, file)
 
-                    # --- Executes the optimal solution. --- #
-                    if self._placementResults(apath, fpath, ModeTest.OPT, self._resultsOpt, iteration, ms, failed) == False:
+                    # --- Executes the exhaustive solution. --- #
+                    if self._placementResults(apath, fpath, ModeTest.EXHAUSTIVE, self._resultsExhaustive, iteration, ms, failed) == False:
                         failed = True
 
                     # --- Executes the heuristic solutions. --- #
-                    self._placementResults(apath, fpath, ModeTest.QUICK0, self._resultsQuick0, iteration, ms)
-                    self._placementResults(apath, fpath, ModeTest.QUICK1, self._resultsQuick1, iteration, ms)
-                    self._placementResults(apath, fpath, ModeTest.QUICK2, self._resultsQuick2, iteration, ms)
+                    self._placementResults(apath, fpath, ModeTest.GREENONLY, self._resultsGreenOnly, iteration, ms)
+                    self._placementResults(apath, fpath, ModeTest.CAPACITYONLY, self._resultsCapacityOnly, iteration, ms)
+                    self._placementResults(apath, fpath, ModeTest.LINEARCOMBINATION, self._resultsLinearCombination, iteration, ms)
 
                 # -- Writes the results to the CSV file, after all the tests for an application are completed. -- #
-                self._csvWriter.writeResults(self._nList, self._resultsOpt, self._resultsQuick0, self._resultsQuick1, self._resultsQuick2)
-                self._nList, self._resultsQuick0, self._resultsQuick1, self._resultsQuick2, self._resultsOpt = [], [], [], [], []
+                self.__csvWriter.writeResults(self._nList, self._resultsExhaustive, self._resultsGreenOnly, self._resultsCapacityOnly, self._resultsLinearCombination)
+                self._nList, self._resultsGreenOnly, self._resultsCapacityOnly, self._resultsLinearCombination, self._resultsExhaustive = [], [], [], [], []
 
 
 
@@ -287,8 +287,8 @@ class CuratedTestEnv(Test):
 
     def __init__(self):
         """Initializes the CuratedTestEnv with default values."""
-        self.__CSVFile = CSV_DIRECTORY + "Curated_Experiment.csv"
-        super().__init__(self.__CSVFile)
+        super().__init__(ModeEnv.CURATED)
+        self.__csvWriter = CSVWriter(CSV_DIRECTORY + "Curated_Experiment.csv")
         self.__fullApp = FULL_APPLICATION_DIRECTORY
         self.__numMS = countMicroservices(self.__fullApp)
         self.__output = []
@@ -306,10 +306,10 @@ class CuratedTestEnv(Test):
             print(f'Iteration {iteration + 1} starting...')
             nodesSTR = ' '.join(map(str, NODES))
             self._deleteTestFiles(INFRASTRUCTURE_DIRECTORY, re.compile(r'crtd_(\d+)\.pl'))
-            command = [sys.executable, 'generate.py', '--m', 'crtd', '--s', str(SEEDS[iteration]), INFRASTRUCTURE_DIRECTORY, self.__fullApp, nodesSTR]
+            command = [sys.executable, 'generate.py', '--m', 'curated', '--s', str(SEEDS[iteration]), '--infraDir', INFRASTRUCTURE_DIRECTORY, '--appFile', self.__fullApp, nodesSTR]
             sp = subprocess.run(command, capture_output=True, text=True)
 
-            # --- Exctracts the optimal placement for each infrastructure generated returned by generate.py. --- #
+            # --- Exctracts the EXHAUSTIVEimal placement for each infrastructure generated returned by generate.py. --- #
             for line in sp.stdout.strip().split('\n'):
                 try:
                     line = line.replace("'", '"')
@@ -324,35 +324,26 @@ class CuratedTestEnv(Test):
                 print(f'Executing tests for file: {file}...')
                 fpath = os.path.join(INFRASTRUCTURE_DIRECTORY, file)
 
-                # --- Find the SCI score for the optimal placement of that generated infrastructure. --- #
-                self._placementResults(self.__fullApp, fpath, ModeTest.BASE, self._resultsOpt, iteration, self.__numMS, False, self.__output[indexFile])
+                # --- Find the SCI score for the EXHAUSTIVEimal placement of that generated infrastructure. --- #
+                self._placementResults(self.__fullApp, fpath, ModeTest.BASE, self._resultsExhaustive, iteration, self.__numMS, False, self.__output[indexFile])
 
                 # --- Executes the heuristic solutions for the generated infrastructure. --- #
-                self._placementResults(self.__fullApp, fpath, ModeTest.QUICK0, self._resultsQuick0, iteration, self.__numMS)
-                self._placementResults(self.__fullApp, fpath, ModeTest.QUICK1, self._resultsQuick1, iteration, self.__numMS)
-                self._placementResults(self.__fullApp, fpath, ModeTest.QUICK2, self._resultsQuick2, iteration, self.__numMS)
+                self._placementResults(self.__fullApp, fpath, ModeTest.GREENONLY, self._resultsGreenOnly, iteration, self.__numMS)
+                self._placementResults(self.__fullApp, fpath, ModeTest.CAPACITYONLY, self._resultsCapacityOnly, iteration, self.__numMS)
+                self._placementResults(self.__fullApp, fpath, ModeTest.LINEARCOMBINATION, self._resultsLinearCombination, iteration, self.__numMS)
 
-            self._csvWriter.writeResults(self._nList, self._resultsOpt, self._resultsQuick0, self._resultsQuick1, self._resultsQuick2)
-            self._nList, self._resultsQuick0, self._resultsQuick1, self._resultsQuick2, self._resultsOpt = [], [], [], [], []
+            self.__csvWriter.writeResults(self._nList, self._resultsExhaustive, self._resultsGreenOnly, self._resultsCapacityOnly, self._resultsLinearCombination)
+            self._nList, self._resultsGreenOnly, self._resultsCapacityOnly, self._resultsLinearCombination, self._resultsExhaustive = [], [], [], [], []
 
 
 prsr = argparse.ArgumentParser(description='Run experiments')
-prsr.add_argument('--envMode', type=str, choices=['realisticEnv', 'curatedEnv'], required=True, help='Mode of operation')
-prsr.add_argument('--csvWritingMode', type=str, choices=['write', 'append'], required=True, help='Mode for the writing of the CSV file')
+prsr.add_argument('--envMode', type=str, choices=['random', 'curated'], required=True, help='Mode of operation')
 prsr.add_argument('--clean', action='store_true', help='Clean the testing directory of previous generated infrastructures before running the tests')
 prsdArgs = prsr.parse_args()
+envMode = ModeEnv[prsdArgs.envMode.upper()]
 
 initializeSettings()
 
-if prsdArgs.envMode == 'realisticEnv':
-    test = RealisticTestEnv()
-    test.runTests()
-elif prsdArgs.envMode == 'curatedEnv':
-    if any(node < countMicroservices(FULL_APPLICATION_DIRECTORY) for node in NODES):
-        print("Error: A curated enviroment test cannot have less nodes than the number of microservices in the application.")
-        sys.exit(1)
-    test = CuratedTestEnv()
-    test.runTests()
-else:
-    print("Invalid mode of operation.")
+test = Test(envMode)
+test.runTests()
 
