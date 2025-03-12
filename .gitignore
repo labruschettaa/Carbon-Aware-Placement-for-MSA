@@ -1,5 +1,0 @@
-.venv/
-src/__pycache__/
-__pycache__/
-resources/dataframes/
-resources/generated_infrastructures/
