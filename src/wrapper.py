@@ -14,7 +14,7 @@ def parsePacking(packing:str) -> List[str]:
     """
     return packing.strip('[]').split(',')
 
-def getParameters() -> Tuple[str, str, str, bool, Optional[List[str]]]:
+def getParameters() -> Tuple[str, str, str, bool, Optional[List[str]], Optional[int]]:
     """Parses command-line arguments for running experiments.
 
     Returns:
@@ -25,10 +25,11 @@ def getParameters() -> Tuple[str, str, str, bool, Optional[List[str]]]:
     prsr.add_argument('iFile', type=str, help='Infrastructure file')
     prsr.add_argument('--mode', type=str, choices=['greenonly', 'capacityonly', 'linearcombination', 'exhaustive', 'base'], required=True, help='Mode of operation')
     prsr.add_argument('--t', action='store_true', help=argparse.SUPPRESS)
+    prsr.add_argument('--timeout', type=int, default=None, help='Timeout in seconds for the Prolog process')
     # --- Expected packing format = "['on(microservice, node)', 'on(microservice, node)', ...]" --- #
     prsr.add_argument('--p', type=parsePacking, required=False, help='Packing')
     prsdArgs = prsr.parse_args()
-    return prsdArgs.aFile, prsdArgs.iFile, prsdArgs.mode, prsdArgs.t, prsdArgs.p
+    return prsdArgs.aFile, prsdArgs.iFile, prsdArgs.mode, prsdArgs.t, prsdArgs.p, prsdArgs.timeout
 
 def printDict(dict:dict):
     """Prints the contents of a dictionary.
@@ -73,9 +74,9 @@ def unpackP(place: List[dict]) -> dict:
     return dictP
 
 
-with PrologMQI() as mqi:
-    aFile, iFile, mode, t, p = getParameters()
-    result = None
+aFile, iFile, mode, t, p, timeout = getParameters()
+result = None
+with PrologMQI(query_timeout_seconds = timeout) as mqi:
     with mqi.create_thread() as prolog_thread:
         prolog_thread.query(f"consult('{aFile}').")
         prolog_thread.query(f"consult('{iFile}').")
@@ -91,7 +92,8 @@ with PrologMQI() as mqi:
             prolog_thread.query_async(f"timedPlacement({mode}, App, {p}, SCI, N, Time).", find_all=False)
             result = prolog_thread.query_async_result()
         elif mode=='exhaustive':
-            result = prolog_thread.query(f"timedPlacement({mode}, App, P, SCI, N, Time).")
+            prolog_thread.query_async(f"timedPlacement({mode}, App, P, SCI, N, Time).", find_all=False)
+            result = prolog_thread.query_async_result()
         else:
             prolog_thread.query_async(f"timedPlacement({mode}, App, P, SCI, N, Time).", find_all=False)
             result = prolog_thread.query_async_result()
@@ -112,7 +114,7 @@ with PrologMQI() as mqi:
                     print(f"\t\tSCI = {result['SCI']}\n\t\tNUMBER OF NODES = {result['N']}\n\n")
         else:
             print(result)
-        prolog_thread.query("cleanUp.")
+    
         
         
             

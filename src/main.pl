@@ -1,5 +1,6 @@
 % Load utility predicates.
 :- ['utils.pl'].
+:- discontiguous placement/5.
 
 timedPlacement(Mode, App, P, SCI, N, Time) :-
     statistics(cputime, TStart),

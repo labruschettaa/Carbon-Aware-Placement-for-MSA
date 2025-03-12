@@ -1,7 +1,7 @@
 from data import ModeTest, ModeEnv
 import os, subprocess, sys, re, json, csv, argparse
 from swiplserver import PrologMQI
-import json
+import json, pandas, random
 
 
 def initializeSettings():
@@ -103,6 +103,16 @@ class Test:
             mode (ModeTest): The mode in which the test is executed.
         """
         self.__mode = mode
+        
+        self._iterationIndex = self._getIterationIndex(csvFile)
+        
+        if (self._iterationIndex + ITERATIONS) > SEEDS.__len__():
+            print("The number of iterations exceeds the length of the array of seeds.\nA random seed will be generated for the next iterations, proceed? (y/n)")
+            response = input().strip().lower()
+            if response not in ['yes', 'y']:
+                raise ValueError("Operation aborted by the user.")
+        
+        self._csvWriter = CSVWriter(csvFile)
         self._nList, self._resultsGreenOnly, self._resultsCapacityOnly, self._resultsLinearCombination, self._resultsExhaustive = [], [], [], [], []
 
     def _placementResults(self, apath:str, fpath:str, mode:ModeTest, results, iteration:int, ms:int, failed=False, packing=None):
@@ -166,10 +176,10 @@ class Test:
         """
         try:
             if mode == ModeTest.BASE and packing is not None:
-                # --- TODO: Fix the packing EXHAUSTIVEion for the base mode. --- #
-                command = [sys.executable, '../wrapper.py', app, infra, '--m', mode.name.lower(), '--t', '--p', str(packing)]
+                # --- TODO: Fix the packing option for the base mode. --- #
+                command = [sys.executable, '../wrapper.py', app, infra, '--m', mode.name.lower(), '--t', '--p', str(packing), '--timeout', str(TIMEOUT_SECONDS)]
             else:
-                command = [sys.executable, '../wrapper.py', app, infra, '--m', mode.name.lower(), '--t']
+                command = [sys.executable, '../wrapper.py', app, infra, '--m', mode.name.lower(), '--t', '--timeout', str(TIMEOUT_SECONDS)]
             sp = subprocess.run(command,
                                 stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL,
@@ -193,6 +203,14 @@ class Test:
         """
         match = re.search(r'\d+', filename)
         return int(match.group()) if match else 0
+    
+    def _getIterationIndex(self, csvFile:str) -> int:
+        iterationIdex = 1
+        if os.path.exists(csvFile):
+            df = pandas.read_csv(csvFile)
+            if 'Iteration' in df.columns:
+                iterationIdex = df['Iteration'].max() + 1
+        return iterationIdex
     
     def _getTestFiles(self, directory, regex):
         """Gets the test files from the specified directory."""
@@ -236,20 +254,26 @@ class RandomTestEnv(Test):
         """Initializes the RandomTestEnv with default values."""
         super().__init__(ModeEnv.RANDOM)
         self.__csvWriter = CSVWriter(CSV_DIRECTORY + "Realistic_Experiment.csv")
+        self.__numMS = countMicroservices(FULL_APPLICATION_DIRECTORY)
 
     def runTests(self):
         """Runs the tests with the specified settings."""
-        for iteration in range(0, ITERATIONS):
-            print(f'Iteration {iteration + 1} starting...')
+        generatedSeeds = []
+        for iteration in range(self._iterationIndex, self._iterationIndex + ITERATIONS):
+            print(f'Iteration {iteration} starting...')
 
             # --- Generates the infrastructures specified in NODES. --- #
             self._deleteTestFiles(INFRASTRUCTURE_DIRECTORY, re.compile(r'rnd_(\d+)\.pl'))
             nodesSTR = ' '.join(map(str, NODES))
-            if prsdArgs.clean:
-                command = [sys.executable, 'generate.py', '--infraDir', INFRASTRUCTURE_DIRECTORY, '--clean', '--mode', 'random', '--seed', str(SEEDS[iteration]), nodesSTR]
-            else:
-                command = [sys.executable, 'generate.py', '--infraDir', INFRASTRUCTURE_DIRECTORY, '--mode', 'random', '--seed',  str(SEEDS[iteration]), nodesSTR]  
-            subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                seed = SEEDS[iteration]
+            except IndexError:
+                seed = random.randint(0, 1000000)
+                print(f"Seed for iteration {iteration} was not found. Using random seed: {seed}")
+                generatedSeeds.append({"iteration": iteration, "seed": seed})
+
+            command = [sys.executable, 'generate.py', '--infraDir', INFRASTRUCTURE_DIRECTORY, '--mode', 'random', '--seed',  str(SEEDS[iteration]), nodesSTR]  
+            subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             # --- Executes all the test for each application in the application directory. --- #
             for afile in sorted(os.listdir(APPLICATION_DIRECTORY)):
@@ -258,7 +282,7 @@ class RandomTestEnv(Test):
                 if ms:
                     ms = ms.group(1)
                 else:
-                    ms = 11
+                    ms = self.__numMS
 
                 # --- Executes the exhaustive and heuristic solutions for each infrastructure generated. --- #
                 failed = False
@@ -280,6 +304,12 @@ class RandomTestEnv(Test):
                 self.__csvWriter.writeResults(self._nList, self._resultsExhaustive, self._resultsGreenOnly, self._resultsCapacityOnly, self._resultsLinearCombination)
                 self._nList, self._resultsGreenOnly, self._resultsCapacityOnly, self._resultsLinearCombination, self._resultsExhaustive = [], [], [], [], []
 
+        if generatedSeeds:
+            print("Experiment completed, generated seeds:")
+            for seed in generatedSeeds:
+                print(f"\tIteration: {seed['iteration']}, Seed: {seed['seed']}")
+        else:
+            print("Experiment completed.")
 
 
 class CuratedTestEnv(Test):
@@ -302,7 +332,7 @@ class CuratedTestEnv(Test):
         Raises:
             json.JSONDecodeError: If there is an error decoding JSON from the output of generate.py.
         """
-        for iteration in range(0,ITERATIONS):
+        for iteration in range(self._iterationIndex, self._iterationIndex + ITERATIONS):
             print(f'Iteration {iteration + 1} starting...')
             nodesSTR = ' '.join(map(str, NODES))
             self._deleteTestFiles(INFRASTRUCTURE_DIRECTORY, re.compile(r'crtd_(\d+)\.pl'))
