@@ -46,13 +46,11 @@ def scalabilityResults(csvFile:str, modeTest:ModeTest, modeEnv:ModeEnv):
     
     modetest = modeTest.name.lower()
     df.replace(['X', '/'], pd.NA, inplace=True)
-    print(modetest)
     df[f'Time_{modetest}'] = pd.to_numeric(df[f'Time_{modetest}'], errors='coerce')
     
     df = df.dropna(subset=[f'Time_{modetest}'])
     
     avgTime = df.groupby(['Microservices', 'InfrastructureNodes'])[f'Time_{modetest}'].mean().reset_index()
-    print(avgTime)
     
     plt.figure(figsize=(10, 6))
     if modeEnv == ModeEnv.CURATED:
@@ -99,14 +97,14 @@ def accuracyResults(csvFile:str, modeTest:ModeTest, modeEnv:ModeEnv):
     df = df.dropna(subset=[f'SCI_{modetest}'])
     
     avgSCI = df.groupby(['Microservices', 'InfrastructureNodes'])[f'SCI_{modetest}'].mean().reset_index()
-    avgSCIopt = df.groupby(['Microservices', 'InfrastructureNodes'])['SCI_opt'].mean().reset_index()
-    mergedDF = pd.merge(avgSCI, avgSCIopt, on=['Microservices', 'InfrastructureNodes'], suffixes=('', '_opt'))
-    mergedDF['SCIDiff'] = abs(mergedDF[f'SCI_{modetest}'] - mergedDF['SCI_opt']) / mergedDF['SCI_opt']
+    avgSCIopt = df.groupby(['Microservices', 'InfrastructureNodes'])['SCI_exhaustive'].mean().reset_index()
+    mergedDF = pd.merge(avgSCI, avgSCIopt, on=['Microservices', 'InfrastructureNodes'], suffixes=('', '_exhaustive'))
+    mergedDF['SCIDiff'] = abs(mergedDF[f'SCI_{modetest}'] - mergedDF['SCI_exhaustive']) / mergedDF['SCI_exhaustive']
 
     plt.figure(figsize=(10, 6))
-    if modeEnv == ModeEnv.CRTD:
+    if modeEnv == ModeEnv.CURATED:
         plt.plot(mergedDF['InfrastructureNodes'], mergedDF['SCIDiff'], marker='o', linestyle='-', label='6 Endpoints')
-    elif modeEnv == ModeEnv.RND:
+    elif modeEnv == ModeEnv.RANDOM:
         for i, ms in enumerate(mergedDF['Microservices'].unique()):
             ms_data = mergedDF[mergedDF['Microservices'] == ms]
             plt.plot(ms_data['InfrastructureNodes'], ms_data['SCIDiff'], marker='o', linestyle='-', label=f'Microservices {ms}')
@@ -117,7 +115,7 @@ def accuracyResults(csvFile:str, modeTest:ModeTest, modeEnv:ModeEnv):
     plt.ylabel('SCI Difference')
     plt.yscale('linear')
     plt.xscale('log', base=2)
-
+    plt.ylim(bottom=0)
     plt.legend()
     plt.grid(True)
     plt.show()
@@ -127,7 +125,7 @@ prsr = argparse.ArgumentParser(description='Visualize the results of the experim
 prsr.add_argument('--modeEnv', type=str, choices=['random', 'curated'], required=True, help='The mode of operation of the experiment that is to be visualized')
 prsr.add_argument('--modeTest', type=str, choices=['exhaustive','greenonly','capacityonly','linearcombination'], required=True, help='The mode of the solution that is to be visualized')
 prsr.add_argument('--parameter', type=str, choices=['accuracy', 'scalability'], required=True, help='The parameter that is to be visualized')
-prsr.add_argument('--app', type=str, help="The application's name")
+prsr.add_argument('--app', type=str, help="The application's name", required=True)
 prsdArgs = prsr.parse_args()
 mode = ModeEnv[prsdArgs.modeEnv.upper()]
 test = ModeTest[prsdArgs.modeTest.upper()]

@@ -3,7 +3,6 @@ import os, subprocess, sys, re, json, csv, argparse
 from swiplserver import PrologMQI
 import json, pandas, random
 
-
 def initializeSettings():
     """Initializes the testing settings from the JSON configuration file.
 
@@ -29,7 +28,6 @@ def initializeSettings():
     FULL_APPLICATION_DIRECTORY = json_data['FULL_APPLICATION_DIRECTORY']
     CSV_DIRECTORY = json_data['CSV_DIRECTORY']
     return NODES, SEEDS, ITERATIONS, TIMEOUT_SECONDS, INFRASTRUCTURE_DIRECTORY, APPLICATION_DIRECTORY, FULL_APPLICATION_DIRECTORY, CSV_DIRECTORY
-
 
 NODES, SEEDS, ITERATIONS, TIMEOUT_SECONDS, INFRASTRUCTURE_DIRECTORY, APPLICATION_DIRECTORY, FULL_APPLICATION_DIRECTORY, CSV_DIRECTORY = initializeSettings()
 
@@ -94,7 +92,6 @@ class CSVWriter:
                  resO['N'], resGO['N'], resCO['N'], resLC['N']]
             )
 
-
 class Test:
     """Class that represents a test to be executed."""
     def __init__(self, mode:ModeTest):
@@ -103,17 +100,9 @@ class Test:
             mode (ModeTest): The mode in which the test is executed.
         """
         self.__mode = mode
-        
-        self._iterationIndex = self._getIterationIndex(csvFile)
-        
-        if (self._iterationIndex + ITERATIONS) > SEEDS.__len__():
-            print("The number of iterations exceeds the length of the array of seeds.\nA random seed will be generated for the next iterations, proceed? (y/n)")
-            response = input().strip().lower()
-            if response not in ['yes', 'y']:
-                raise ValueError("Operation aborted by the user.")
-        
-        self._csvWriter = CSVWriter(csvFile)
         self._nList, self._resultsGreenOnly, self._resultsCapacityOnly, self._resultsLinearCombination, self._resultsExhaustive = [], [], [], [], []
+
+    
 
     def _placementResults(self, apath:str, fpath:str, mode:ModeTest, results, iteration:int, ms:int, failed=False, packing=None):
         """Processes the placement results and updates the results list.
@@ -121,7 +110,7 @@ class Test:
         Args:
             apath (str): The path to the application file.
             fpath (str): The path to the file where results are stored.
-            mode (str): The mode in which the placement is executed.
+            mode (str): The mode in which the placement is executed.    
             results (list): The list to store the results.
             iteration (int): The current iteration number.
             ms (int): The number of MS.
@@ -205,12 +194,24 @@ class Test:
         return int(match.group()) if match else 0
     
     def _getIterationIndex(self, csvFile:str) -> int:
-        iterationIdex = 1
-        if os.path.exists(csvFile):
+        iterationIndex = 1
+        if os.path.exists(csvFile) and os.path.getsize(csvFile) > 0:
             df = pandas.read_csv(csvFile)
             if 'Iteration' in df.columns:
-                iterationIdex = df['Iteration'].max() + 1
-        return iterationIdex
+                max = df['Iteration'].max()
+                if not pandas.isna(max):
+                    iterationIndex = df['Iteration'].max() + 1
+        if (iterationIndex + ITERATIONS) > SEEDS.__len__():
+            print("The number of iterations exceeds the length of the array of seeds.\nA random seed will be generated for the next iterations, proceed? (y/n)")
+            while True:
+                response = input().strip().lower()
+                if response in ['no', 'n']:
+                    raise ValueError("Operation aborted by the user.")
+                elif response in ['yes', 'y']:
+                    break
+                else:
+                    print("Invalid response. (y/n)")
+        return iterationIndex
     
     def _getTestFiles(self, directory, regex):
         """Gets the test files from the specified directory."""
@@ -245,7 +246,6 @@ class Test:
             print("Invalid mode of operation.")
             return False
 
-
 class RandomTestEnv(Test):
     """A class to execute tests in realistic generated environments.
     After a tests is terminated its results are written to a CSV file."""
@@ -253,13 +253,15 @@ class RandomTestEnv(Test):
     def __init__(self):
         """Initializes the RandomTestEnv with default values."""
         super().__init__(ModeEnv.RANDOM)
-        self.__csvWriter = CSVWriter(CSV_DIRECTORY + "Realistic_Experiment.csv")
+        csvFile = CSV_DIRECTORY + "Realistic_Experiment_" + os.path.basename(os.path.normpath(APPLICATION_DIRECTORY)) + ".csv"
+        self.__csvWriter = CSVWriter(csvFile)
         self.__numMS = countMicroservices(FULL_APPLICATION_DIRECTORY)
-
+        self.__iterationIndex = self._getIterationIndex(csvFile)
+        
     def runTests(self):
         """Runs the tests with the specified settings."""
         generatedSeeds = []
-        for iteration in range(self._iterationIndex, self._iterationIndex + ITERATIONS):
+        for iteration in range(self.__iterationIndex, self.__iterationIndex + ITERATIONS):
             print(f'Iteration {iteration} starting...')
 
             # --- Generates the infrastructures specified in NODES. --- #
@@ -311,14 +313,15 @@ class RandomTestEnv(Test):
         else:
             print("Experiment completed.")
 
-
 class CuratedTestEnv(Test):
     """Class to execute tests in the curated environments."""
 
     def __init__(self):
         """Initializes the CuratedTestEnv with default values."""
         super().__init__(ModeEnv.CURATED)
-        self.__csvWriter = CSVWriter(CSV_DIRECTORY + "Curated_Experiment.csv")
+        csvFile = CSV_DIRECTORY + "Curated_Experiment_" + os.path.basename(os.path.normpath(APPLICATION_DIRECTORY)) + ".csv"
+        self.__csvWriter = CSVWriter(csvFile)
+        self.__iterationIndex = self._getIterationIndex(csvFile)
         self.__fullApp = FULL_APPLICATION_DIRECTORY
         self.__numMS = countMicroservices(self.__fullApp)
         self.__output = []
@@ -332,7 +335,7 @@ class CuratedTestEnv(Test):
         Raises:
             json.JSONDecodeError: If there is an error decoding JSON from the output of generate.py.
         """
-        for iteration in range(self._iterationIndex, self._iterationIndex + ITERATIONS):
+        for iteration in range(self.__iterationIndex, self.__iterationIndex + ITERATIONS):
             print(f'Iteration {iteration + 1} starting...')
             nodesSTR = ' '.join(map(str, NODES))
             self._deleteTestFiles(INFRASTRUCTURE_DIRECTORY, re.compile(r'crtd_(\d+)\.pl'))
@@ -364,7 +367,6 @@ class CuratedTestEnv(Test):
 
             self.__csvWriter.writeResults(self._nList, self._resultsExhaustive, self._resultsGreenOnly, self._resultsCapacityOnly, self._resultsLinearCombination)
             self._nList, self._resultsGreenOnly, self._resultsCapacityOnly, self._resultsLinearCombination, self._resultsExhaustive = [], [], [], [], []
-
 
 prsr = argparse.ArgumentParser(description='Run experiments')
 prsr.add_argument('--envMode', type=str, choices=['random', 'curated'], required=True, help='Mode of operation')

@@ -52,7 +52,6 @@ class NodeT(Enum):
     BROKEN = 2
     DIRTY = 3
 
-
 class Node:
     """Class representing a node.
 
